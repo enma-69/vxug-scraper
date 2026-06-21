@@ -3,12 +3,52 @@
 [![CI](https://github.com/YOUR_USER/vxug-scraper/actions/workflows/ci.yml/badge.svg)](https://github.com/YOUR_USER/vxug-scraper/actions/workflows/ci.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)](#requirements)
 
-Bulk downloader for the [VX-Underground](https://vx-underground.org) malware research archive.  
-Bypasses Cloudflare by driving a real Microsoft Edge session — no proxies, no CAPTCHA solving services.
+> Bulk downloader for the [VX-Underground](https://vx-underground.org) malware research archive.
+> Bypasses Cloudflare by driving a **real Microsoft Edge session** — no proxies, no CAPTCHA solvers, no paid services.
 
-> **For security research and threat intelligence only.**  
-> Never execute samples outside an isolated sandbox environment.
+---
+
+## About
+
+[VX-Underground](https://vx-underground.org) hosts the world's largest publicly available malware research archive:
+builder kits, research papers, and over a million malware samples organised by family, platform, and year.
+The site runs behind Cloudflare and uses **Phoenix LiveView** (Elixir) for its file browser,
+meaning the entire folder tree is navigated over a single WebSocket — there are no plain `<a>` links to scrape.
+
+`vxug-scraper` solves both problems:
+
+| Problem | Solution |
+|---|---|
+| **Cloudflare Bot Fight** | Launches a real `msedge.exe` binary via [pydoll-python](https://github.com/thalissonvs/pydoll). Genuine TLS/JA3 fingerprint, real V8, real `navigator.*` APIs — CF sees an ordinary human browser. |
+| **Phoenix LiveView navigation** | After one page load the session stays open. Folder traversal is done by injecting clicks into `[phx-click]` elements — no page reloads, no new CF challenges. |
+| **Presigned S3 URL expiry (~1 h)** | Crawling and downloading run as a pipelined producer/consumer — files are fetched the moment they are discovered, never after the URL has expired. |
+| **Interrupted runs** | Every discovered URL is written to SQLite before download begins. Re-running the same command skips already-completed files instantly. |
+| **Rate limiting** | Exponential backoff + `Retry-After` header, configurable worker concurrency, and an optional watchdog that auto-restarts on crash or hang. |
+
+### What it collects
+
+| Section | Contents | Typical size |
+|---|---|---|
+| `Builders` | RAT builders, crypters, binders, stealers, botnets | ~5 GB |
+| `Papers` | Malware analysis write-ups, research papers, POCs | ~2 GB |
+| `Samples/Argus Collection` | Argus-tagged malware samples | ~10 GB |
+| `Samples/Virusshare Collection` | VirusShare-tagged samples | ~50 GB |
+| `Samples/Bazaar Collection` | MalwareBazaar-tagged samples | ~50 GB+ |
+
+### Classification pipeline
+
+Every downloaded file is automatically tagged across three axes:
+
+- **Platform** — `Windows` `Linux` `Android` `macOS` `Script` `Java` `Document` `Archive`
+- **Malware class** — `Ransomware` `RAT` `Stealer` `Backdoor` `Botnet` `Loader` `Banker` `Worm` `Rootkit` `Exploit` `Cryptominer` `Spyware` `Trojan`
+- **Impact** — `Critical` → `High` → `Medium` → `Low` → `Info`
+
+Results land in SQLite and a generated Markdown report — queryable without re-downloading anything.
+
+> **For security research and threat intelligence only.**
+> Do not execute samples outside an isolated analysis environment.
 
 ---
 
