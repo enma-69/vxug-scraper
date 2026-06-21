@@ -206,8 +206,7 @@ async def _file_links(page) -> list[str]:
     for(const a of document.querySelectorAll('a[href]')){
         const h=a.href;
         if(h.includes('backblazeb2.com')||h.includes('s3.us-east')||
-           /\.(zip|7z|rar|tar|gz|bz2|xz|exe|dll|sys|bin|msi|bat|cmd|vbs|ps1|py|rb|sh
-              |c|cpp|cs|asm|java|pdf|doc|docx|txt|apk|elf)(\?|$)/i.test(h))
+           /\.(zip|7z|rar|tar|gz|bz2|xz|exe|dll|sys|bin|msi|bat|cmd|vbs|ps1|py|rb|sh|c|cpp|cs|asm|java|pdf|doc|docx|txt|apk|elf)(\?|$)/i.test(h))
             out.push(h);
     }
     return JSON.stringify(out);
