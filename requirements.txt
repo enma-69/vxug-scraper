@@ -1,0 +1,7 @@
+# vxug-scraper dependencies
+# Install: pip install -r requirements.txt
+
+pydoll-python>=1.4.0   # Chromium/Edge CDP automation — Cloudflare bypass via real browser
+aiohttp>=3.9.0         # async HTTP download with range-request resume
+aiofiles>=23.2.1       # async file I/O
+rich>=13.0.0           # progress bars, tables, styled console output

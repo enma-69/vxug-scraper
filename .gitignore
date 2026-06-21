@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Output — never commit downloaded malware or database files
+output/
+*.db
+*.db-shm
+*.db-wal
+*.log
+*.pid
+manifest.csv
+report.md
+report.txt
+
+# OS artefacts
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
