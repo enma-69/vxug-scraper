@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    name: Syntax & import check
+    runs-on: windows-latest        # Edge is pre-installed on windows-latest runners
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Check syntax (all scripts)
+        run: |
+          python -m py_compile vxdl.py
+          python -m py_compile watchdog.py
+          python -m py_compile launch.py
+          python -m py_compile report.py
+
+      - name: Verify CLI help (no browser launched)
+        run: |
+          python vxdl.py    --help
+          python watchdog.py --help
+          python launch.py   --help
+          python report.py   --help
+
+      - name: Verify module imports
+        run: |
+          python -c "
+          import vxdl
+          assert callable(vxdl.main)
+          assert callable(vxdl._classify)
+          assert callable(vxdl._check_magic)
+          assert vxdl.BASE_URL == 'https://vx-underground.org'
+          print('imports OK')
+          "

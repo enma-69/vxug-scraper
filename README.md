@@ -1,109 +1,202 @@
 # vxug-scraper
 
-Bulk downloader for the [VX-Underground](https://vx-underground.org) malware research archive.
+[![CI](https://github.com/YOUR_USER/vxug-scraper/actions/workflows/ci.yml/badge.svg)](https://github.com/YOUR_USER/vxug-scraper/actions/workflows/ci.yml)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Bypasses Cloudflare by driving a real Microsoft Edge session via [pydoll-python](https://github.com/thalissonvs/pydoll).  
-The site runs Phoenix LiveView (Elixir), so navigation is done by injecting clicks into the LiveView element tree — no page reloads, one persistent WebSocket — which avoids triggering repeated Cloudflare challenges.
+Bulk downloader for the [VX-Underground](https://vx-underground.org) malware research archive.  
+Bypasses Cloudflare by driving a real Microsoft Edge session — no proxies, no CAPTCHA solving services.
 
-## How the bypass works
+> **For security research and threat intelligence only.**  
+> Never execute samples outside an isolated sandbox environment.
 
-| Layer | Mechanism |
+---
+
+## How the Cloudflare bypass works
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  vxdl.py                                                        │
+│                                                                 │
+│  1. Launch real Edge via pydoll-python (genuine TLS/JA3,        │
+│     real V8, real navigator.* APIs — CF sees a real browser)    │
+│                                                                 │
+│  2. Navigate ONCE to the target section                         │
+│     └─ wait for CF challenge to clear (~5-90 s)                 │
+│                                                                 │
+│  3. Crawl Phoenix LiveView tree by injecting clicks             │
+│     into [phx-click] elements — stays in the same              │
+│     WebSocket session (no page reloads → no new CF checks)      │
+│                                                                 │
+│  4. For each discovered file: push to asyncio download queue    │
+│     └─ aiohttp workers download immediately (presigned S3       │
+│        URLs expire in ~1 h, so crawl + download are pipelined)  │
+│                                                                 │
+│  5. After all files done: sanitation → classification → report  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+| CF Layer | Bypass mechanism |
 |---|---|
-| **Cloudflare** | Real Edge browser with genuine TLS fingerprint + JS engine. No headless flags exposed. |
-| **Phoenix LiveView** | Click injection via `phx-click` attribute parsing — stays in the same WS session across all folders. |
-| **Presigned S3 URLs** | Files are discovered and downloaded immediately (URLs expire in ~1 hour). |
-| **Rate limiting** | Exponential backoff + `Retry-After` header respect. Configurable per-section concurrency. |
-| **Resumption** | SQLite tracks every URL. Interrupted runs resume from where they stopped. |
+| TLS fingerprint (JA3) | Real Edge binary — genuine JA3, not Python requests |
+| Browser JS checks | Real V8 engine — `navigator.webdriver`, `chrome.*`, `permissions.*` all genuine |
+| Bot challenge page | Wait loop polls `document.title` until "checking"/"moment" disappears |
+| Rate limiting | Exponential backoff + `Retry-After` header, configurable concurrency |
+| Session continuity | One navigation per section; subsequent folder access via LiveView click injection (no page reload) |
+
+---
 
 ## Requirements
 
-- Python 3.10+
-- Microsoft Edge (stable) — [download](https://www.microsoft.com/edge)
-- ~100 GB free disk for full collection (Samples section is very large)
+| Requirement | Notes |
+|---|---|
+| Python 3.10+ | 3.11+ recommended |
+| Microsoft Edge (stable) | [Download here](https://www.microsoft.com/edge) — must be installed, not portable |
+| Disk space | ~5 GB for Builders, ~10 GB for Papers, 500 GB+ for full Samples |
+| Network | Stable connection — downloads resume automatically on interruption |
 
-```
+---
+
+## Installation
+
+```bash
+git clone https://github.com/YOUR_USER/vxug-scraper.git
+cd vxug-scraper
 pip install -r requirements.txt
 ```
 
+---
+
 ## Usage
 
+### Basic
+
 ```bash
-# Builders section only (default, ~2-5 GB)
+# Builders section only (default, ~5 GB)
 python vxdl.py
 
-# Papers + Builders
+# Multiple sections
 python vxdl.py --sections Papers Builders
 
-# Single Samples sub-collection
-python vxdl.py --sections "Samples/Argus Collection" --concurrency 4 --max-depth 6
+# Sub-collection (space in name — quote it)
+python vxdl.py --sections "Samples/Argus Collection" --max-depth 6
 
-# All three Samples sub-collections
-python vxdl.py --sections \
-  "Samples/Argus Collection" \
-  "Samples/Virusshare Collection" \
-  "Samples/Bazaar Collection" \
-  --concurrency 4 --max-depth 6
+# Test run — only 3 top-level folders, see it work in ~60 s
+python vxdl.py --limit 3
+```
 
-# Test run — only first 5 top-level folders
-python vxdl.py --limit 5
+### Custom output directory
 
-# Re-run report without downloading anything
-python vxdl.py --stage report
+```bash
+# Via flag
+python vxdl.py --out C:\Research\vxug
 
-# Standalone report from an existing DB
+# Via environment variable (persists across runs)
+set VXUG_OUT=C:\Research\vxug       # Windows
+export VXUG_OUT=/data/vxug          # Linux / macOS
+python vxdl.py
+```
+
+### Long-running / detached (survives terminal close)
+
+```bash
+# Launches watchdog → watchdog keeps vxdl.py alive on crash/hang
+python launch.py --sections Builders Papers --hours 72
+
+# Full Samples collection (very large — give it days)
+python launch.py --sections "Samples/Argus Collection" "Samples/Virusshare Collection" --hours 168 --concurrency 6
+```
+
+### Resume an interrupted run
+
+```bash
+# Just re-run — already-downloaded URLs are skipped (SQLite dedup)
+python vxdl.py --sections Builders
+```
+
+### Report only (read-only, safe while downloader is running)
+
+```bash
+python report.py                         # auto-finds output/vxdl.db
 python report.py --db output/vxdl.db --out output/
 ```
 
-### Detached / long-running (survives terminal close)
+---
 
-```bash
-# Windows & Linux/macOS — launches watchdog which keeps vxdl.py alive
-python launch.py --sections Builders Papers --hours 48
+## All CLI flags
 
-# Custom output directory
-VXUG_OUT=/data/vxug python launch.py --sections Builders --concurrency 6
-```
+### `vxdl.py` — main pipeline
+
+| Flag | Default | Description |
+|---|---|---|
+| `--sections` | `Builders` | One or more sections: `Builders` `Papers` `Samples` `"Samples/Argus Collection"` `"Samples/Virusshare Collection"` `"Samples/Bazaar Collection"` |
+| `--out` | `./output` | Download root directory (`VXUG_OUT` env var overrides) |
+| `--concurrency` | `4` | Parallel download workers |
+| `--cf-timeout` | `90` | Seconds to wait for Cloudflare to clear per navigation |
+| `--max-depth` | `5` | Maximum folder recursion depth (Builders needs 5, Samples needs 6) |
+| `--limit` | `0` (all) | Only first N top-level folders — useful for testing |
+| `--stage` | full pipeline | Run one stage only: `download` `sanitize` `classify` `report` |
+| `--force` | off | Skip environment feasibility check |
+
+### `watchdog.py` — auto-restart daemon
+
+| Flag | Default | Description |
+|---|---|---|
+| `--sections` | `Builders` | Passed through to `vxdl.py` |
+| `--hours` | `48` | Total runtime budget |
+| `--hang` | `360` | Seconds of no disk/log growth before declaring a hang |
+| `--concurrency` | `4` | Passed through to `vxdl.py` |
+
+### `launch.py` — detached launcher
+
+Same flags as `watchdog.py`. Starts watchdog in a fully detached process that survives terminal close.
+
+### `report.py` — standalone report
+
+| Flag | Default | Description |
+|---|---|---|
+| `--db` | `./output/vxdl.db` | Path to SQLite database |
+| `--out` | `./output` | Directory to write `report.md` and `report.txt` |
+
+---
 
 ## Environment variables
 
-| Variable | Default | Purpose |
+| Variable | Default | Description |
 |---|---|---|
-| `VXUG_OUT` | `./output` | Output / download directory |
-| `VXUG_EDGE` | auto-detected | Path to `msedge.exe` |
-| `VXUG_CONCURRENCY` | `4` | Parallel download workers |
+| `VXUG_OUT` | `./output` | Output directory for downloads, DB, logs |
+| `VXUG_EDGE` | auto-detected | Full path to `msedge.exe` |
+| `VXUG_CONCURRENCY` | `4` | Default download worker count |
 
-## CLI flags (vxdl.py)
-
-| Flag | Default | Purpose |
-|---|---|---|
-| `--sections` | `Builders` | One or more section paths |
-| `--out` | `./output` | Output directory |
-| `--concurrency` | `4` | Parallel download workers |
-| `--cf-timeout` | `90` | Seconds to wait for Cloudflare to clear |
-| `--max-depth` | `5` | Maximum folder recursion depth |
-| `--limit` | `0` (all) | Only first N top-level folders per section |
-| `--stage` | full pipeline | Run one stage: `download` / `sanitize` / `classify` / `report` |
-| `--force` | off | Continue even if environment check fails |
+---
 
 ## Pipeline stages
 
 ```
-Stage 0  Feasibility   — check Python version, packages, Edge binary, disk space
-Stage 1  Download      — crawl LiveView tree, download files, write manifest.csv
-Stage 2  Sanitation    — verify magic bytes / SHA-256 for each downloaded file
-Stage 3  Classification — tag platform / impact / malware class from path + extension
-Stage 4  Report        — print + save report.txt summary
+Stage 0  Feasibility     Python ≥3.10, packages, Edge binary, disk space
+Stage 1  Download        Crawl LiveView tree → discover URLs → download concurrently
+                         Resume: already-done URLs skipped via SQLite
+Stage 2  Sanitation      Check magic bytes (ZIP, 7z, RAR, PDF, MZ, ELF…) + SHA-256
+Stage 3  Classification  Tag platform / impact / malware class from path + extension
+Stage 4  Report          Print + save report.txt to output directory
 ```
 
-## Output
+---
+
+## Output structure
 
 ```
 output/
-├── vxdl.db          # SQLite — all discovered URLs, status, SHA-256, local path
-├── manifest.csv     # append-only download log
-├── vxdl.log         # structured pipeline log
-├── report.txt       # collection summary (generated by Stage 4)
-├── Builders/        # downloaded files mirroring site folder structure
+├── vxdl.db               SQLite — all URLs, status, SHA-256, local path, timestamps
+├── manifest.csv          Append-only download log (ts, section, folder, file, size, sha256, url)
+├── vxdl.log              Full pipeline log
+├── report.txt            Collection summary (generated by Stage 4)
+├── Builders/
+│   ├── NjRat/
+│   │   ├── NjRat 0.7d.zip
+│   │   └── ...
+│   ├── DarkComet/
+│   └── ...
 ├── Papers/
 └── Samples/
     ├── Argus Collection/
@@ -111,19 +204,46 @@ output/
     └── Bazaar Collection/
 ```
 
-## Files
+---
+
+## File overview
 
 | File | Purpose |
 |---|---|
-| `vxdl.py` | Main pipeline — crawl, download, sanitize, classify, report |
-| `watchdog.py` | Restart `vxdl.py` automatically on crash or hang |
-| `launch.py` | Start the watchdog fully detached (survives terminal close) |
-| `report.py` | Standalone report from an existing database (read-only, safe mid-run) |
-| `requirements.txt` | Python dependencies |
+| [`vxdl.py`](vxdl.py) | Main pipeline — crawl + download + sanitize + classify + report |
+| [`watchdog.py`](watchdog.py) | Restart `vxdl.py` on crash or hang, stay within a time budget |
+| [`launch.py`](launch.py) | Start the watchdog detached (survives terminal/session close) |
+| [`report.py`](report.py) | Standalone report from an existing DB — safe to run mid-download |
+| [`requirements.txt`](requirements.txt) | Python dependencies |
+| [`pyproject.toml`](pyproject.toml) | Project metadata |
 
-## Legal / ethical
+---
+
+## Troubleshooting
+
+**Edge not found**  
+Set `VXUG_EDGE` to the full path of `msedge.exe`, or install Edge from [microsoft.com/edge](https://www.microsoft.com/edge).
+
+**Cloudflare never clears**  
+Increase `--cf-timeout 120`. If still failing, the IP may be temporarily blocked — wait a few minutes and retry. The watchdog handles this automatically.
+
+**`found 0` files**  
+Increase `--max-depth` (default 5, some Samples sub-collections need 6+).
+
+**Download stuck / no progress**  
+The watchdog detects hangs (default 360 s of no disk growth) and restarts automatically. Run via `launch.py` for long sessions.
+
+**Resume after crash**  
+Re-run the same command — the SQLite database tracks every URL. Already-completed downloads are skipped instantly.
+
+**Windows `[Errno 22]` on filenames**  
+`_safe_name()` strips illegal characters (`< > : " | ? *`) and trailing dots/spaces. If you still hit this, check the `vxdl.log` for the offending path.
+
+---
+
+## Legal / ethical notice
 
 This tool is intended for malware research, threat intelligence, and academic study.  
 VX-Underground publishes these samples for the security research community.  
-Do not execute samples outside an isolated analysis environment.  
+Do not execute samples outside an isolated analysis environment (VM with no network, or a dedicated sandbox).  
 You are solely responsible for your use of this tool and the content you download.

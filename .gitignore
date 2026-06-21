@@ -12,6 +12,8 @@ env/
 
 # Output — never commit downloaded malware or database files
 output/
+test_output/
+*_output/
 *.db
 *.db-shm
 *.db-wal
